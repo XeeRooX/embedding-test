@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Embedding benchmark</title>
+<!-- Без внешних зависимостей: страница должна работать на машине без интернета -->
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --surface-2: #f0efec;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --border: rgba(11, 11, 11, 0.10);
+    --accent: #2a78d6;
+    --accent-ink: #ffffff;
+    --bar: #2a78d6;
+    --critical: #d03b3b;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --surface-2: #232321;
+      --ink: #f0efec;
+      --ink-2: #c3c2b7;
+      --grid: #2c2c2a;
+      --border: rgba(255, 255, 255, 0.10);
+      --accent: #3987e5;
+      --bar: #3987e5;
+      --critical: #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-2: #232321;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --grid: #2c2c2a;
+    --border: rgba(255, 255, 255, 0.10);
+    --accent: #3987e5;
+    --bar: #3987e5;
+    --critical: #e66767;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1120px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  .sub { color: var(--ink-2); margin-top: 4px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .stack > * + * { margin-top: 16px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .models { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--surface-2); cursor: pointer; user-select: none;
+    max-width: 100%; overflow-wrap: anywhere;
+  }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  label.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+  textarea {
+    width: 100%; min-height: 180px; resize: vertical;
+    padding: 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--page); color: var(--ink); font: inherit;
+  }
+  .drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 180px; padding: 16px; text-align: center;
+    border: 1.5px dashed var(--muted); border-radius: 8px; color: var(--ink-2); cursor: pointer;
+  }
+  .drop.over { border-color: var(--accent); color: var(--ink); }
+  .drop input { display: none; }
+  .filelist { margin: 8px 0 0; padding: 0; list-style: none; color: var(--ink-2); font-size: 13px; overflow-wrap: anywhere; }
+
+  button {
+    font: inherit; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-2); color: var(--ink);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .hint { color: var(--muted); font-size: 13px; }
+
+  .status { display: none; align-items: center; gap: 10px; }
+  .status.on { display: flex; }
+  .spinner {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid var(--grid); border-top-color: var(--accent);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error { color: var(--critical); }
+
+  /* Результаты */
+  .run-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+  .run-title { font-weight: 600; overflow-wrap: anywhere; }
+  .meta { color: var(--muted); font-size: 13px; }
+
+  .chart-title { color: var(--ink-2); font-size: 13px; margin-bottom: 8px; }
+  .bars { display: grid; grid-template-columns: minmax(120px, 34%) 1fr; row-gap: 2px; margin-bottom: 16px; }
+  .bar-row { display: contents; }
+  .bar-label, .bar-cell { padding: 5px 0; }
+  .bar-label { padding-right: 12px; color: var(--ink-2); font-size: 13px; overflow-wrap: anywhere; }
+  .bar-cell { display: flex; align-items: center; gap: 8px; min-width: 0; border-left: 1px solid var(--grid); }
+  .bar { height: 14px; background: var(--bar); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .bar-value { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .bar-row:hover .bar { filter: brightness(1.12); }
+  .bar-row:hover .bar-label { color: var(--ink); }
+  .bar-error { color: var(--critical); font-size: 13px; padding-left: 8px; }
+
+  .tooltip {
+    position: fixed; z-index: 10; pointer-events: none; display: none;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.15); font-size: 13px; max-width: 320px;
+  }
+  .tooltip b { display: block; margin-bottom: 4px; overflow-wrap: anywhere; }
+  .tooltip .k { color: var(--ink-2); }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--grid); text-align: right; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+  td { font-variant-numeric: tabular-nums; }
+  td.name { white-space: normal; overflow-wrap: anywhere; min-width: 120px; }
+  tr.total td { font-weight: 600; }
+  tr.err td { color: var(--critical); white-space: normal; text-align: left; }
+  .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+</style>
+</head>
+<body>
+<main class="stack">
+  <header>
+    <h1>Embedding benchmark</h1>
+    <div class="sub" id="params">Загрузка конфигурации…</div>
+  </header>
+
+  <section class="card">
+    <h2>Модели</h2>
+    <div class="models" id="models"></div>
+    <div class="row" style="margin-top:12px">
+      <label class="check"><input type="checkbox" id="warmup" checked> Прогрев перед замером</label>
+      <span class="hint">Загрузка модели в память не попадёт в замер (время прогрева покажется отдельно)</span>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Свой текст</h2>
+      <textarea id="text" placeholder="Вставьте текст для преобразования в эмбеддинги…"></textarea>
+      <div class="row" style="margin-top:12px; justify-content:space-between">
+        <span class="hint" id="textInfo">0 символов</span>
+        <button class="primary" id="runText">Запустить</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Файлы .txt</h2>
+      <label class="drop" id="drop">
+        <input type="file" id="files" multiple accept=".txt,text/plain">
+        <span>Перетащите файлы сюда или нажмите, чтобы выбрать</span>
+        <ul class="filelist" id="fileList"></ul>
+      </label>
+      <div class="row" style="margin-top:12px; justify-content:flex-end">
+        <button class="primary" id="runFiles" disabled>Запустить бенчмарк</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="status" id="status">
+    <div class="spinner"></div>
+    <span id="statusText">Выполняется…</span>
+    <button id="cancel">Отменить</button>
+  </div>
+  <div class="error" id="error"></div>
+
+  <section>
+    <div class="row" style="justify-content:space-between; margin-bottom:12px">
+      <h2 style="margin:0">Результаты</h2>
+      <button id="clear">Очистить</button>
+    </div>
+    <div class="stack" id="results"></div>
+  </section>
+</main>
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const HISTORY_KEY = "embedding-benchmark-history";
+const fmt = (n, d = 0) => Number(n ?? 0).toLocaleString("ru-RU", { maximumFractionDigits: d, minimumFractionDigits: d });
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+let history = [];
+let controller = null;
+let timer = null;
+
+// ---------- конфигурация ----------
+async function loadConfig() {
+  try {
+    const r = await fetch("models");
+    const cfg = await r.json();
+    $("params").textContent =
+      `num_thread: ${cfg.numThread || "авто"} · чанк: ${cfg.chunkSize} симв., перекрытие ${cfg.chunkOverlap} · батч: ${cfg.batchSize}`;
+    $("models").innerHTML = cfg.models.map(m =>
+      `<label class="chip" title="Коллекция: ${esc(m.collection)}">
+         <input type="checkbox" name="model" value="${esc(m.name)}" checked> ${esc(m.name)}
+       </label>`).join("");
+  } catch (e) {
+    $("params").textContent = "Не удалось загрузить конфигурацию: " + e.message;
+  }
+}
+
+const selectedModels = () => [...document.querySelectorAll("input[name=model]:checked")].map(i => i.value);
+
+// ---------- ввод ----------
+$("text").addEventListener("input", () => {
+  $("textInfo").textContent = `${fmt($("text").value.length)} символов`;
+});
+
+function showFiles() {
+  const files = [...$("files").files];
+  $("fileList").innerHTML = files.map(f => `<li>${esc(f.name)} · ${fmt(f.size / 1024, 1)} КБ</li>`).join("");
+  $("runFiles").disabled = files.length === 0 || controller !== null;
+}
+$("files").addEventListener("change", showFiles);
+const drop = $("drop");
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => {
+  e.preventDefault();
+  drop.classList.remove("over");
+  $("files").files = e.dataTransfer.files;
+  showFiles();
+});
+
+// ---------- запуск ----------
+function query() {
+  const p = new URLSearchParams();
+  selectedModels().forEach(m => p.append("models", m));
+  p.set("warmup", $("warmup").checked);
+  return p.toString();
+}
+
+async function run(label, url, init) {
+  if (selectedModels().length === 0) { $("error").textContent = "Выберите хотя бы одну модель"; return; }
+  $("error").textContent = "";
+  controller = new AbortController();
+  setBusy(true);
+  try {
+    const r = await fetch(url, { ...init, signal: controller.signal });
+    const body = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(body?.error || body?.detail || body?.title || `HTTP ${r.status}`);
+    history.unshift({ label, at: new Date().toISOString(), ...body });
+    saveHistory();
+    render();
+  } catch (e) {
+    $("error").textContent = e.name === "AbortError" ? "Отменено" : "Ошибка: " + e.message;
+  } finally {
+    controller = null;
+    setBusy(false);
+  }
+}
+
+function setBusy(busy) {
+  $("status").classList.toggle("on", busy);
+  $("runText").disabled = busy;
+  $("runFiles").disabled = busy || $("files").files.length === 0;
+  clearInterval(timer);
+  if (busy) {
+    const start = Date.now();
+    const tick = () => $("statusText").textContent = `Выполняется… ${fmt((Date.now() - start) / 1000)} с`;
+    tick();
+    timer = setInterval(tick, 1000);
+  }
+}
+
+$("runText").addEventListener("click", () => {
+  const text = $("text").value;
+  if (!text.trim()) { $("error").textContent = "Введите текст"; return; }
+  run(`Текст · ${fmt(text.length)} симв.`, `embed?${query()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+});
+
+$("runFiles").addEventListener("click", () => {
+  const files = [...$("files").files];
+  const form = new FormData();
+  files.forEach(f => form.append("files", f));
+  run(`Файлы · ${files.map(f => f.name).join(", ")}`, `benchmark?${query()}`, { method: "POST", body: form });
+});
+
+$("cancel").addEventListener("click", () => controller?.abort());
+$("clear").addEventListener("click", () => { history = []; saveHistory(); render(); });
+
+// ---------- история (только удобство: в браузере этого пользователя) ----------
+function loadHistory() {
+  try { history = JSON.parse(localStorage.getItem(HISTORY_KEY)) || []; } catch { history = []; }
+}
+function saveHistory() {
+  history = history.slice(0, 30);
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch { /* хранилище недоступно */ }
+}
+
+// ---------- отрисовка ----------
+function render() {
+  const root = $("results");
+  if (history.length === 0) {
+    root.innerHTML = `<div class="card empty">Здесь появятся результаты запусков</div>`;
+    return;
+  }
+  root.innerHTML = history.map((h, i) => renderRun(h, i)).join("");
+}
+
+function renderRun(h, idx) {
+  const runs = h.runs || [];
+  // Сравниваем по символам/с: у моделей разные токенизаторы, токены/с между ними несопоставимы
+  const max = Math.max(1, ...runs.map(r => r.charsPerSec || 0));
+  const bars = runs.map((r, j) => `
+    <div class="bar-row" data-run="${idx}" data-model="${j}">
+      <div class="bar-label">${esc(r.model)}</div>
+      <div class="bar-cell">${r.error
+        ? `<span class="bar-error">ошибка</span>`
+        : `<div class="bar" style="width:${Math.max(0.5, (r.charsPerSec / max) * 80)}%"></div>
+           <span class="bar-value">${fmt(r.charsPerSec)}</span>`}
+      </div>
+    </div>`).join("");
+
+  const rows = runs.map(r => {
+    if (r.error) return `<tr class="err"><td class="name">${esc(r.model)}</td><td colspan="9">${esc(r.error)}</td></tr>`;
+    const files = r.files.map(f => `
+      <tr>
+        <td class="name">${esc(r.model)}</td><td class="name">${esc(f.source)}</td>
+        <td>${fmt(f.chars)}</td><td>${fmt(f.chunks)}</td><td>${fmt(f.tokens)}</td>
+        <td>${fmt(f.embeddingMs)}</td><td>${fmt(f.upsertMs)}</td><td>${fmt(f.totalMs)}</td>
+        <td>${fmt(f.charsPerSec)}</td><td>${fmt(f.tokensPerSec)}</td>
+      </tr>`).join("");
+    const total = r.files.length > 1 ? `
+      <tr class="total">
+        <td class="name">${esc(r.model)}</td><td>Итого</td>
+        <td>${fmt(r.totalChars)}</td>
+        <td>${fmt(r.files.reduce((s, f) => s + f.chunks, 0))}</td>
+        <td>${fmt(r.totalTokens)}</td>
+        <td>${fmt(r.embeddingMs)}</td><td>${fmt(r.upsertMs)}</td><td>${fmt(r.totalMs)}</td>
+        <td>${fmt(r.charsPerSec)}</td><td>${fmt(r.tokensPerSec)}</td>
+      </tr>` : "";
+    return files + total;
+  }).join("");
+
+  return `
+  <article class="card">
+    <div class="run-head">
+      <div class="run-title">${esc(h.label)}</div>
+      <div class="meta">${new Date(h.at).toLocaleString("ru-RU")} · num_thread ${h.numThread || "авто"} ·
+        чанк ${h.chunkSize}/${h.chunkOverlap} · батч ${h.batchSize} · прогрев ${h.warmup ? "да" : "нет"}</div>
+    </div>
+    <div class="chart-title">Скорость эмбеддинга, символов/с (больше — лучше; токены/с у разных моделей несопоставимы)</div>
+    <div class="bars">${bars}</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Модель</th><th>Источник</th><th>Символов</th><th>Чанков</th><th>Токенов</th>
+          <th>Эмбеддинги, мс</th><th>Запись в БД, мс</th><th>Всего, мс</th><th>Символов/с</th><th>Токенов/с</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </article>`;
+}
+
+// Тултип по наведению на строку графика
+const tip = $("tooltip");
+$("results").addEventListener("mousemove", e => {
+  const row = e.target.closest(".bar-row");
+  if (!row) { tip.style.display = "none"; return; }
+  const r = history[+row.dataset.run].runs[+row.dataset.model];
+  tip.innerHTML = r.error
+    ? `<b>${esc(r.model)}</b><span class="error">${esc(r.error)}</span>`
+    : `<b>${esc(r.model)}</b>
+       <div><span class="k">Символов/с:</span> ${fmt(r.charsPerSec)}</div>
+       <div><span class="k">Токенов/с:</span> ${fmt(r.tokensPerSec)} (${fmt(r.totalTokens)} токенов)</div>
+       <div><span class="k">Эмбеддинги:</span> ${fmt(r.embeddingMs)} мс</div>
+       <div><span class="k">Всего:</span> ${fmt(r.totalMs)} мс</div>
+       ${r.warmupMs != null ? `<div><span class="k">Прогрев (загрузка модели):</span> ${fmt(r.warmupMs)} мс</div>` : ""}
+       <div><span class="k">Коллекция:</span> ${esc(r.collection)}</div>`;
+  tip.style.display = "block";
+  const x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+  const y = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8);
+  tip.style.left = x + "px";
+  tip.style.top = y + "px";
+});
+$("results").addEventListener("mouseleave", () => tip.style.display = "none");
+
+loadHistory();
+render();
+loadConfig();
+</script>
+</body>
+</html>

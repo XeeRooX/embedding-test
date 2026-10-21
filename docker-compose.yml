@@ -1,4 +1,7 @@
-﻿services:
+﻿# Фиксированное имя проекта: от него зависят имена томов (embedding-test_ollama_data, ...)
+name: embedding-test
+
+services:
   ollama:
     image: ollama/ollama:${OLLAMA_IMAGE_TAG}
     cpus: ${OLLAMA_CPUS}
@@ -13,13 +16,25 @@
       retries: 30
     restart: unless-stopped
 
-  # Одноразовый контейнер: скачивает модель эмбеддингов из .env
+  # Одноразовый контейнер: скачивает модели эмбеддингов из .env.
+  # Уже скачанные модели пропускаются — так стек стартует и без интернета.
   ollama-pull:
     image: ollama/ollama:${OLLAMA_IMAGE_TAG}
     environment:
       OLLAMA_HOST: ollama:11434
-      MODEL: ${OLLAMA_EMBED_MODEL}
-    entrypoint: ["sh", "-c", "ollama pull \"$$MODEL\""]
+      MODELS: ${OLLAMA_EMBED_MODELS}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        for m in $$(echo "$$MODELS" | tr ',' ' '); do
+          if ollama show "$$m" >/dev/null 2>&1; then
+            echo "$$m: уже скачана"
+          else
+            ollama pull "$$m"
+          fi
+        done
     depends_on:
       ollama:
         condition: service_healthy
@@ -41,6 +56,7 @@
     restart: unless-stopped
 
   embedder-api:
+    image: embedding-test/embedder-api:local
     build:
       context: ./src/EmbedderApi
     env_file: .env

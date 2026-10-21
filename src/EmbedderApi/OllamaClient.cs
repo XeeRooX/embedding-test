@@ -4,11 +4,11 @@ namespace EmbedderApi;
 
 public sealed class OllamaClient(HttpClient http, AppSettings settings)
 {
-    public async Task<EmbedResponse> EmbedAsync(IReadOnlyList<string> inputs, CancellationToken ct)
+    public async Task<EmbedResponse> EmbedAsync(string model, IReadOnlyList<string> inputs, CancellationToken ct)
     {
         var request = new Dictionary<string, object>
         {
-            ["model"] = settings.EmbedModel,
+            ["model"] = model,
             ["input"] = inputs,
             ["truncate"] = true,
             ["keep_alive"] = settings.KeepAlive,

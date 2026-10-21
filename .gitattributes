@@ -1,0 +1,2 @@
+# Скрипты запускаются на Linux — CRLF ломает bash
+*.sh text eol=lf

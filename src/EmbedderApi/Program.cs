@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using EmbedderApi;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
@@ -31,24 +31,45 @@ builder.Services.AddProblemDetails();
 
 var app = builder.Build();
 app.UseExceptionHandler();
+app.UseDefaultFiles();
+app.UseStaticFiles(); // UI: wwwroot/index.html
 
-app.MapGet("/health", () => Results.Ok(new
+app.MapGet("/health", () => Results.Ok(new { status = "ok", models = settings.EmbedModels }));
+
+// Модели из конфигурации и параметры прогона — для UI
+app.MapGet("/models", () => Results.Ok(new
 {
-    status = "ok",
-    model = settings.EmbedModel,
-    collection = settings.CollectionName,
+    models = settings.EmbedModels.Select(m => new { name = m, collection = settings.CollectionName(m) }),
     numThread = settings.NumThread,
+    chunkSize = settings.ChunkSize,
+    chunkOverlap = settings.ChunkOverlap,
+    batchSize = settings.EmbedBatchSize,
 }));
 
-// Обычный текст -> эмбеддинги -> Qdrant.
+// Обычный текст -> эмбеддинги -> Qdrant для каждой модели из ?models=...
+// (по умолчанию — все модели из конфигурации).
 // Принимает text/plain или JSON {"text": "..."}.
-app.MapPost("/embed", async (HttpRequest request, IngestService ingest, CancellationToken ct) =>
+app.MapPost("/embed", async (
+    HttpRequest request,
+    IngestService ingest,
+    CancellationToken ct,
+    [FromQuery] string[]? models,
+    bool warmup = false) =>
 {
+    if (!TryResolveModels(models, out var selected, out var error)) return error;
+
     string text;
     if (request.HasJsonContentType())
     {
-        var body = await request.ReadFromJsonAsync<EmbedRequest>(ct);
-        text = body?.Text ?? "";
+        try
+        {
+            var body = await request.ReadFromJsonAsync<EmbedRequest>(ct);
+            text = body?.Text ?? "";
+        }
+        catch (JsonException ex)
+        {
+            return Results.BadRequest(new { error = $"Некорректный JSON (ожидается UTF-8): {ex.Message}" });
+        }
     }
     else
     {
@@ -59,63 +80,56 @@ app.MapPost("/embed", async (HttpRequest request, IngestService ingest, Cancella
     if (string.IsNullOrWhiteSpace(text))
         return Results.BadRequest(new { error = "Пустой текст" });
 
-    var result = await ingest.IngestAsync(text, "api:embed", ct);
-    return Results.Ok(new
-    {
-        model = settings.EmbedModel,
-        tokens = result.Tokens,
-        chunks = result.Chunks,
-        embeddingMs = result.EmbeddingMs,
-        upsertMs = result.UpsertMs,
-        totalMs = result.TotalMs,
-    });
+    var runs = await ingest.RunAsync(selected, [new SourceText("text", text)], warmup, ct);
+    return Results.Ok(Report(runs, warmup));
 });
 
-// Бенчмарк: несколько .txt файлов (multipart, поле "files") -> время на каждый файл.
+// Бенчмарк: несколько .txt файлов (multipart, поле "files") -> время на каждый файл и каждую модель.
 app.MapPost("/benchmark", async (
     [FromForm] IFormFileCollection files,
     IngestService ingest,
     CancellationToken ct,
+    [FromQuery] string[]? models,
     bool warmup = true) =>
 {
     if (files.Count == 0)
         return Results.BadRequest(new { error = "Передайте один или несколько файлов в поле 'files'" });
+    if (!TryResolveModels(models, out var selected, out var error)) return error;
 
-    if (warmup) await ingest.WarmupAsync(ct);
-
-    var overall = Stopwatch.StartNew();
-    var results = new List<IngestResult>();
+    var sources = new List<SourceText>();
     foreach (var file in files)
     {
         using var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8);
-        var text = await reader.ReadToEndAsync(ct);
-        results.Add(await ingest.IngestAsync(text, file.FileName, ct));
+        sources.Add(new SourceText(file.FileName, await reader.ReadToEndAsync(ct)));
     }
-    overall.Stop();
 
-    return Results.Ok(new
-    {
-        model = settings.EmbedModel,
-        collection = settings.CollectionName,
-        numThread = settings.NumThread,
-        chunkSize = settings.ChunkSize,
-        batchSize = settings.EmbedBatchSize,
-        files = results.Select(r => new
-        {
-            file = r.Source,
-            chars = r.Chars,
-            chunks = r.Chunks,
-            tokens = r.Tokens,
-            embeddingMs = r.EmbeddingMs,
-            upsertMs = r.UpsertMs,
-            totalMs = r.TotalMs,
-            tokensPerSec = r.EmbeddingMs > 0 ? Math.Round(r.Tokens / (r.EmbeddingMs / 1000), 1) : 0,
-        }),
-        totalTokens = results.Sum(r => r.Tokens),
-        totalMs = Math.Round(overall.Elapsed.TotalMilliseconds, 2),
-    });
+    var runs = await ingest.RunAsync(selected, sources, warmup, ct);
+    return Results.Ok(Report(runs, warmup));
 }).DisableAntiforgery();
 
 app.Run();
+
+// Пустой список — все модели из конфигурации; неизвестные модели — 400.
+bool TryResolveModels(string[]? requested, out IReadOnlyList<string> selected, out IResult error)
+{
+    selected = requested is { Length: > 0 } ? requested.Distinct().ToList() : settings.EmbedModels;
+    var unknown = selected.Except(settings.EmbedModels).ToList();
+    error = Results.BadRequest(new
+    {
+        error = $"Модели не заданы в OLLAMA_EMBED_MODELS: {string.Join(", ", unknown)}",
+        available = settings.EmbedModels,
+    });
+    return unknown.Count == 0;
+}
+
+object Report(List<ModelRun> runs, bool warmup) => new
+{
+    numThread = settings.NumThread,
+    chunkSize = settings.ChunkSize,
+    chunkOverlap = settings.ChunkOverlap,
+    batchSize = settings.EmbedBatchSize,
+    warmup,
+    runs,
+};
 
 record EmbedRequest(string? Text);

@@ -7,7 +7,8 @@ public sealed record AppSettings
 {
     public required string OllamaUrl { get; init; }
     public string? OllamaApiKey { get; init; }
-    public required string EmbedModel { get; init; }
+    /// <summary>Модели для тестирования; первая — модель по умолчанию.</summary>
+    public required IReadOnlyList<string> EmbedModels { get; init; }
     public required string KeepAlive { get; init; }
     public int NumThread { get; init; }
 
@@ -21,14 +22,14 @@ public sealed record AppSettings
     public long MaxUploadBytes { get; init; }
 
     /// <summary>Коллекция на модель: разные модели дают разную размерность векторов.</summary>
-    public string CollectionName =>
-        $"{CollectionPrefix}_{Regex.Replace(EmbedModel, "[^a-zA-Z0-9_-]", "_")}";
+    public string CollectionName(string model) =>
+        $"{CollectionPrefix}_{Regex.Replace(model, "[^a-zA-Z0-9_-]", "_")}";
 
     public static AppSettings FromConfiguration(IConfiguration c) => new()
     {
         OllamaUrl = c["OLLAMA_URL"] ?? "http://localhost:11434",
         OllamaApiKey = NullIfEmpty(c["OLLAMA_API_KEY"]),
-        EmbedModel = c["OLLAMA_EMBED_MODEL"] ?? "nomic-embed-text",
+        EmbedModels = ParseModels(c["OLLAMA_EMBED_MODELS"]),
         KeepAlive = c["OLLAMA_KEEP_ALIVE"] ?? "10m",
         NumThread = ResolveNumThread(c),
 
@@ -41,6 +42,16 @@ public sealed record AppSettings
         EmbedBatchSize = Math.Max(1, c.GetValue("EMBED_BATCH_SIZE", 16)),
         MaxUploadBytes = c.GetValue("MAX_UPLOAD_BYTES", 200L * 1024 * 1024),
     };
+
+    /// <summary>Список через запятую; пустой — nomic-embed-text.</summary>
+    private static List<string> ParseModels(string? raw)
+    {
+        var models = (raw ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct()
+            .ToList();
+        return models.Count > 0 ? models : ["nomic-embed-text"];
+    }
 
     /// <summary>
     /// Явный OLLAMA_NUM_THREAD, иначе — лимит CPU контейнера (OLLAMA_CPUS).

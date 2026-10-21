@@ -5,15 +5,14 @@ namespace EmbedderApi;
 
 public sealed record QdrantPoint(Guid Id, float[] Vector, Dictionary<string, object> Payload);
 
-public sealed class QdrantClient(HttpClient http, AppSettings settings)
+public sealed class QdrantClient(HttpClient http)
 {
     // Коллекции, наличие которых уже проверено (живёт весь процесс)
     private static readonly ConcurrentDictionary<string, int> KnownCollections = new();
     private static readonly SemaphoreSlim CreateLock = new(1, 1);
 
-    public async Task EnsureCollectionAsync(int vectorSize, CancellationToken ct)
+    public async Task EnsureCollectionAsync(string name, int vectorSize, CancellationToken ct)
     {
-        var name = settings.CollectionName;
         if (KnownCollections.ContainsKey(name)) return;
 
         await CreateLock.WaitAsync(ct);
@@ -45,14 +44,14 @@ public sealed class QdrantClient(HttpClient http, AppSettings settings)
         }
     }
 
-    public async Task UpsertAsync(IReadOnlyList<QdrantPoint> points, CancellationToken ct)
+    public async Task UpsertAsync(string collection, IReadOnlyList<QdrantPoint> points, CancellationToken ct)
     {
         var body = new
         {
             points = points.Select(p => new { id = p.Id, vector = p.Vector, payload = p.Payload })
         };
         using var resp = await http.PutAsJsonAsync(
-            $"/collections/{settings.CollectionName}/points?wait=true", body, ct);
+            $"/collections/{collection}/points?wait=true", body, ct);
         await EnsureSuccess(resp, ct);
     }
 
